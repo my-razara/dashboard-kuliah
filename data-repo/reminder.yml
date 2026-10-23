@@ -1,0 +1,41 @@
+# Pengingat Tuton — dipasang otomatis oleh dashboard Tuton Tracker.
+# Membaca data.json di repo ini dan mengirim email lewat Gmail.
+#
+# Secret yang dibutuhkan (Settings → Secrets and variables → Actions):
+#   GMAIL_USER          alamat Gmail pengirim
+#   GMAIL_APP_PASSWORD  App Password 16 huruf dari myaccount.google.com/apppasswords
+#   EMAIL_TO            (opsional) alamat tujuan, default sama dengan GMAIL_USER
+
+name: Pengingat Tuton
+
+on:
+  schedule:
+    - cron: '41 23 * * *'   # 06.41 WIB setiap hari
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'tes = kirim sekarang apa pun isinya · otomatis = sama seperti jadwal harian'
+        type: choice
+        options: [tes, otomatis]
+        default: tes
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pengingat-tuton
+  cancel-in-progress: false
+
+jobs:
+  kirim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Kirim pengingat
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'otomatis' }}
+        run: python3 .github/scripts/reminder.py

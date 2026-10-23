@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tuton Tracker</title>
+<meta name="description" content="Pelacak diskusi, latihan, tugas, Tuweb, dan UAS Universitas Terbuka.">
+<meta name="theme-color" content="#1B2432">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231B2432'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11' fill='none' stroke='%238FB0FF' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div id="boot" class="loading">Memuat…</div>
+
+<div id="setup" class="setup" hidden>
+  <div class="setup-card" id="setupCard"></div>
+</div>
+
+<div class="shell" id="shell" style="display:none">
+  <aside class="rail" id="rail">
+    <div class="brand">
+      <h1>Tuton Tracker</h1>
+      <p>Universitas Terbuka</p>
+    </div>
+    <nav class="nav" id="nav">
+      <button data-v="radar" class="on"><span class="dot"></span><span class="lbl-full">Minggu ini</span><span class="lbl-short">Minggu</span></button>
+      <button data-v="matriks"><span class="dot"></span><span class="lbl-full">Matriks sesi</span><span class="lbl-short">Matriks</span></button>
+      <button data-v="jadwal"><span class="dot"></span><span class="lbl-full">Jadwal &amp; Tuweb</span><span class="lbl-short">Jadwal</span></button>
+      <button data-v="nilai"><span class="dot"></span><span class="lbl-full">Nilai</span><span class="lbl-short">Nilai</span></button>
+      <button data-v="atur"><span class="dot"></span><span class="lbl-full">Atur semester</span><span class="lbl-short">Atur</span></button>
+    </nav>
+    <div class="rail-foot" id="semWrap">
+      <button class="sync-pill sibuk" id="syncPill" type="button"><i></i><span>Memuat…</span></button>
+      <label for="semPick">Semester</label>
+      <select id="semPick"></select>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar" id="topbar">
+      <span class="tb-name">Tuton Tracker</span>
+    </div>
+    <section class="view on" id="v-radar">
+      <div class="head">
+        <h2>Minggu ini</h2>
+        <p id="radarSub"></p>
+      </div>
+      <div id="twBanner"></div>
+      <div class="strip" id="strip"></div>
+      <div id="radarIsi"></div>
+    </section>
+
+    <section class="view" id="v-matriks">
+      <div class="head">
+        <h2>Matriks sesi</h2>
+        <p>Klik satu kotak untuk buka semua yang jatuh di sesi itu.</p>
+      </div>
+      <div class="bulk-bar">
+        <span>Tandai satu sesi untuk semua mata kuliah:</span>
+        <select id="bulkSesi"></select>
+        <button class="btn small" id="bulkSelesai">Selesai</button>
+        <button class="btn ghost small" id="bulkBelum">Kembalikan ke belum</button>
+      </div>
+      <div class="matrix-wrap" id="matrixWrap"></div>
+      <div class="legend">
+        <span><i class="pip hadir"></i> Daftar hadir</span>
+        <span><i class="pip"></i> Diskusi &amp; latihan</span>
+        <span><i class="pip tugas"></i> Tugas</span>
+        <span><i class="pip tuweb"></i> Tuweb</span>
+        <span><i class="pip draft"></i> Draft</span>
+        <span><i class="pip submitted"></i> Selesai</span>
+        <span><i class="pip telat"></i> Lewat deadline</span>
+        <span><i class="pip nihil"></i> Tidak ada di matkul ini</span>
+      </div>
+    </section>
+
+    <section class="view" id="v-jadwal">
+      <div class="head">
+        <h2>Jadwal &amp; Tuweb</h2>
+        <p>Tuweb punya tanggal sendiri. Slot mingguan di bawahnya buat rutinitas yang berulang.</p>
+      </div>
+
+      <div class="card card-pad">
+        <div class="kal-head">
+          <span class="kal-bln" id="kalBln"></span>
+          <span class="kal-nav">
+            <button class="kal-arrow" id="kalPrev" aria-label="Bulan sebelumnya">&lsaquo;</button>
+            <button class="kal-arrow" id="kalNext" aria-label="Bulan berikutnya">&rsaquo;</button>
+            <button class="btn ghost small" id="kalNow">Hari ini</button>
+          </span>
+        </div>
+        <div class="kal-grid" id="kalGrid"></div>
+        <div class="legend" style="margin-top:12px">
+          <span><i style="width:16px;height:8px;border-radius:3px;background:var(--pen);display:block"></i> Tuweb</span>
+          <span><i class="kal-dot" style="background:var(--ink3)"></i> Deadline diskusi, latihan, tugas</span>
+          <span><i style="width:13px;height:13px;border-radius:3px;box-shadow:inset 0 0 0 2px var(--mark);display:block"></i> UAS</span>
+        </div>
+      </div>
+
+      <div class="card card-pad">
+        <h3 class="sec-title">Tanggal Tuweb</h3>
+        <p class="hint">Isi tanggal dan jam sesuai pengumuman tutor. Pengingat email dikirim H-1 dan pagi hari-H.</p>
+        <div id="twList"></div>
+        <div class="sync-bar">
+          <div class="btn-row" style="margin:0">
+            <button class="btn ghost" id="icsTuweb">Unduh semua Tuweb (.ics)</button>
+            <button class="btn ghost" id="icsTugas">Unduh deadline tugas (.ics)</button>
+          </div>
+          <p class="hint" style="margin:10px 0 0">Tombol di tiap baris membuka Google Calendar dengan acara yang sudah terisi, tinggal Simpan. File .ics buat menambahkan banyak sekaligus lewat Google Calendar → Setelan → Impor. Mengimpor file yang sama dua kali bisa bikin acara dobel. Untuk menghapus acara, hapus langsung di Google Calendar.</p>
+        </div>
+      </div>
+
+      <div class="card card-pad">
+        <h3 class="sec-title">Jadwal UAS</h3>
+        <p class="hint">Tiap mata kuliah bisa punya tanggal dan jam sendiri. Ubah tanggal UAS di Atur semester untuk mengatur semuanya sekaligus.</p>
+        <div id="uasList"></div>
+        <div class="sync-bar">
+          <div class="btn-row" style="margin:0">
+            <button class="btn ghost" id="icsUas">Unduh semua UAS (.ics)</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card card-pad">
+        <h3 class="sec-title">Slot mingguan</h3>
+        <div class="week" id="week"></div>
+        <div class="row3" style="margin-top:16px">
+          <div class="field">
+            <label for="jdMk">Mata kuliah</label>
+            <select id="jdMk"></select>
+          </div>
+          <div class="field">
+            <label for="jdHari">Hari</label>
+            <select id="jdHari"></select>
+          </div>
+          <div class="field">
+            <label for="jdTipe">Jenis</label>
+            <select id="jdTipe">
+              <option value="belajar">Waktu belajar</option>
+              <option value="praktik">Praktik</option>
+            </select>
+          </div>
+        </div>
+        <div class="row3">
+          <div class="field"><label for="jdMulai">Mulai</label><input type="time" id="jdMulai" value="19:00"></div>
+          <div class="field"><label for="jdSelesai">Selesai</label><input type="time" id="jdSelesai" value="21:00"></div>
+          <div class="field"><label for="jdKet">Catatan</label><input type="text" id="jdKet" placeholder="opsional"></div>
+        </div>
+        <div class="btn-row"><button class="btn" id="jdSimpan">Tambah slot</button></div>
+      </div>
+    </section>
+
+    <section class="view" id="v-nilai">
+      <div class="head">
+        <h2>Perkiraan nilai</h2>
+        <p>Nilai Tuton menyumbang 30%, UAS 70%. Nilai Tuton sendiri: Tugas 50%, Diskusi 30%, Daftar Hadir 20%.</p>
+        <p style="color:var(--alert);font-size:13.5px;margin-top:6px">Catatan: kalau jawaban benar UAS di bawah 30% dari jumlah soal, nilai Tuton hangus dan nilai akhir diambil murni dari UAS.</p>
+      </div>
+      <div class="card" id="nilaiIsi"></div>
+    </section>
+
+    <section class="view" id="v-atur">
+      <div class="head">
+        <h2>Atur semester</h2>
+        <p>Pilih pola yang cocok, dan seluruh item sesi 1–8 kebentuk sendiri.</p>
+      </div>
+
+      <div class="card card-pad">
+        <h3 class="sec-title">Semester aktif</h3>
+        <div class="row3">
+          <div class="field"><label for="sLabel">Nama semester</label><input type="text" id="sLabel" placeholder="2026.1"></div>
+          <div class="field"><label for="sMulai">Tuton mulai</label><input type="date" id="sMulai"></div>
+          <div class="field"><label for="sUas">UAS</label><input type="date" id="sUas"></div>
+        </div>
+        <p class="hint">Ganti tanggal mulai Tuton dan semua deadline ikut bergeser. Tanggal Tuweb tidak ikut, karena itu ditetapkan tutor.</p>
+        <div class="btn-row">
+          <button class="btn" id="sSimpan">Simpan perubahan</button>
+          <button class="btn ghost" id="sBaru">Buat semester baru</button>
+          <button class="btn ghost" id="sDuplikat">Salin matkul ke semester baru</button>
+          <button class="btn ghost" id="sLengkapi">Lengkapi item sesuai pola</button>
+        </div>
+      </div>
+
+      <div class="card card-pad">
+        <h3 class="sec-title">Mata kuliah</h3>
+        <div id="mkList"></div>
+        <div class="row3" style="margin-top:16px">
+          <div class="field"><label for="mkKode">Kode</label><input type="text" id="mkKode" placeholder="MKDU4221"></div>
+          <div class="field"><label for="mkNama">Nama</label><input type="text" id="mkNama" placeholder="Struktur Data"></div>
+          <div class="field"><label for="mkSks">SKS</label><input type="number" id="mkSks" value="3" min="1" max="6"></div>
+        </div>
+        <div class="row3">
+          <div class="field"><label for="mkPola">Pola pelaksanaan</label><select id="mkPola"></select></div>
+          <div class="field"><label for="mkLink">Link ruang Tuton</label><input type="url" id="mkLink" placeholder="https://elearning.ut.ac.id/..."></div>
+          <div class="field"><label for="mkWarna">Warna penanda</label><input type="color" id="mkWarna" value="#2F5FE0" style="height:38px;padding:3px"></div>
+        </div>
+        <p class="hint" id="polaHint"></p>
+        <div class="field">
+          <label for="mkProfil">Profil untuk asisten <span style="color:var(--ink3)">(opsional)</span></label>
+          <textarea id="mkProfil" placeholder="Karakter matkul ini: gaya jawaban yang diharapkan, sumber utama, hal yang wajib ada. Dipakai buat ngisi prompt asisten."></textarea>
+        </div>
+        <div class="btn-row"><button class="btn" id="mkSimpan">Tambah mata kuliah</button></div>
+      </div>
+
+      <div class="card card-pad" id="cfgCard"></div>
+    </section>
+  </main>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true"></aside>
+<div class="toast" id="toast"></div>
+
+<script src="assets/store.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
