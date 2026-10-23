@@ -1086,7 +1086,7 @@ function ringkasUrl(u){
 
 function renderSetup(galatAwal){
   $('#setupCard').innerHTML=
-    '<div class="setup-head"><span class="setup-mark">Tuton Tracker</span><h2>Sambungkan ke Apps Script</h2>'+
+    '<div class="setup-head"><span class="setup-mark"><img src="assets/icons/logo.svg" alt="" width="26" height="26">Tuton Tracker</span><h2>Sambungkan ke Apps Script</h2>'+
     '<p>Datanya tetap di Google Sheets lu. Halaman ini cuma tampilan, jadi butuh alamat dan kunci dari Apps Script supaya bisa membaca dan menyimpan data.</p></div>'+
     '<ol class="setup-steps">'+
       '<li><b>Perbarui Code.gs.</b> Salin isi <a target="_blank" rel="noopener" href="'+URL_CODE_GS+'">Code.gs terbaru</a> dan tempel menimpa Code.gs di editor Apps Script, lalu simpan.</li>'+

@@ -425,3 +425,17 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center}
 #cfgCard .hint{margin-top:8px}
 #cfgCard .btn-row{margin-top:0}
 .setup-card > p + .btn-row{margin-top:16px}
+
+/* logo */
+.brand{display:flex;align-items:center;gap:10px}
+.brand-logo{width:34px;height:34px;flex:0 0 34px;border-radius:9px;box-shadow:0 0 0 1px rgba(255,255,255,.12)}
+.tb-logo{display:none}
+.setup-mark{display:inline-flex;align-items:center;gap:9px}
+.setup-mark img{border-radius:7px}
+@media (max-width:760px){
+  .tb-logo{display:block;width:28px;height:28px;border-radius:7px;flex:0 0 28px}
+}
+.brand{padding:0 2px}
+.brand-logo{width:30px;height:30px;flex:0 0 30px;border-radius:8px}
+.brand h1{font-size:17px;white-space:nowrap}
+.brand p{font-size:12px;white-space:nowrap}
