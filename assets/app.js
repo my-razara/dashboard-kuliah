@@ -9,6 +9,43 @@ var STATUS={belum:'Belum',draft:'Draft',submitted:'Kirim',nihil:'Tidak ada'};
 var STATUS_TUWEB={belum:'Belum',draft:'Siap',submitted:'Hadir',nihil:'Tidak ada'};
 var STATUS_HADIR={belum:'Belum',submitted:'Hadir',nihil:'Tidak ada'};
 
+/* ---------- koneksi ke Apps Script ----------
+ * Data tetap di Google Sheets. Halaman ini memanggil Web App Apps Script
+ * lewat fetch, membawa kunci API yang disimpan di browser perangkat ini.
+ */
+var KUNCI_KONEKSI='tuton.api.v1', KUNCI_CACHE='tuton.cache.v1';
+var API=null;
+try{ API=JSON.parse(localStorage.getItem(KUNCI_KONEKSI)||'null') }catch(e){ API=null }
+
+function galat(pesan,kode){ var e=new Error(pesan); e.kode=kode; return e }
+
+function panggilApi(koneksi,fn,args){
+  return fetch(koneksi.url,{
+    method:'POST',
+    // text/plain supaya browser tidak mengirim preflight CORS yang ditolak Apps Script
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify({kunci:koneksi.kunci,fn:fn,args:args||[]}),
+    redirect:'follow'
+  }).then(function(r){ return r.text() }, function(){
+    throw galat('Tidak bisa menghubungi Apps Script. Periksa koneksi internet, atau pastikan deploy Web App memakai akses "Anyone".','offline');
+  }).then(function(t){
+    var d;
+    try{ d=JSON.parse(t) }catch(e){
+      throw galat('Respons bukan dari API Tuton Tracker. Pastikan URL Web App berakhiran /exec, Code.gs sudah versi terbaru, dan deploy memakai akses "Anyone".','bukan-api');
+    }
+    if(!d.ok) throw galat(d.galat||'Permintaan ditolak.',d.kode);
+    return d.hasil;
+  });
+}
+
+function call(fn){
+  var args=[].slice.call(arguments,1);
+  if(!API) return Promise.reject(galat('Belum tersambung ke Apps Script.','belum'));
+  return panggilApi(API,fn,args).catch(function(e){
+    if(e.kode==='kunci-salah'||e.kode==='belum-ada-kunci') renderSetup(e.message);
+    throw e;
+  });
+}
 function $(s){return document.querySelector(s)}
 function el(t,c,h){var e=document.createElement(t); if(c)e.className=c; if(h!==undefined)e.innerHTML=h; return e}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
@@ -40,20 +77,36 @@ function aktif(it){return it.status!=='nihil'}
 function telat(it){return aktif(it) && it.status!=='submitted' && selisih(hariIni(),it.deadline)<0}
 function namaItem(it){return it.label || (LBL[it.tipe]+' '+it.sesi)}
 
-function muat(){
-  DB=Store.view;
-  if(!DB) return Promise.resolve();
-  DB.config=Store.uiConfig();
-  DB.hariIni=Store.hariIni();
+function terapkanData(json){
+  DB=JSON.parse(json);
   if(!DB.semester.length){
-    call('tambahSemester',{label:'Semester baru',mulai_tuton:DB.hariIni,tgl_uas:''});
+    tampilkan('boot','<b style="display:block;color:var(--ink);font-size:16px;margin-bottom:6px">Belum ada semester</b>Jalankan <b>setupAwal()</b> di editor Apps Script, lalu muat ulang halaman ini.');
+    return false;
   }
   var aktifSem=DB.semester.filter(function(s){return s.status==='aktif'})[0]||DB.semester[0];
   SEM = SEM ? (DB.semester.filter(function(s){return s.id===SEM.id})[0]||aktifSem) : aktifSem;
   tampilkan('app');
   aturLayout();
   render();
-  return Promise.resolve();
+  return true;
+}
+
+function muat(){
+  if(!API){ renderSetup(); return Promise.resolve(); }
+  return call('getAllData').then(function(json){
+    try{ localStorage.setItem(KUNCI_CACHE,json) }catch(e){}
+    terapkanData(json);
+  }).catch(function(e){
+    if(e.kode==='kunci-salah'||e.kode==='belum-ada-kunci') return;
+    if(DB){ toast(e.message); return; }
+    tampilkan('boot',
+      '<b style="display:block;color:var(--ink);font-size:16px;margin-bottom:6px">Gagal memuat data</b>'+esc(e.message)+
+      '<div class="btn-row" style="justify-content:center;margin-top:14px">'+
+        '<button class="btn" id="bootUlang">Coba lagi</button>'+
+        '<button class="btn ghost" id="bootGanti">Ganti URL atau kunci</button></div>');
+    $('#bootUlang').onclick=function(){ tampilkan('boot','Memuat data dari Google Sheets…'); muat(); };
+    $('#bootGanti').onclick=function(){ renderSetup(); };
+  });
 }
 
 function render(){renderSemPick();renderPolaOpsi();renderRadar();renderMatriks();renderJadwal();renderNilai();renderAtur();renderPengaturan()}
@@ -491,128 +544,63 @@ function tutupDrawer(){
 function simpanItem(id,patch){
   for(var i=0;i<DB.item.length;i++) if(DB.item[i].id===id){for(var k in patch) DB.item[i][k]=patch[k];break}
   renderRadar();renderMatriks();renderNilai();renderTuwebList();renderUasList();renderKalender();
-  call('ubahItem',id,patch).catch(function(e){toast(e.message)});
+  call('ubahItem',id,patch).then(function(){toast('Tersimpan')}).catch(function(){toast('Gagal menyimpan, coba lagi')});
 }
 
 /* ---------- jadwal + tuweb ---------- */
-/* ---------- Google Calendar (tanpa server) ----------
- * Tombol per item membuka Google Calendar dengan acara yang sudah terisi.
- * Dashboard mencatat jadwal saat tombol ditekan, jadi kalau tanggal atau jam
- * berubah sesudahnya, lu dikasih tahu bahwa event di kalender perlu diganti.
- */
-function pad2(n){return (n<10?'0':'')+n}
-
-function waktuAcara(it){
-  var timed=(it.tipe==='tuweb') || (it.tipe==='uas' && it.jam);
-  if(!timed) return null;
-  var jam=(it.jam||Store.CONFIG.JAM_TUWEB_DEFAULT).split(':');
-  var t=it.deadline.split('-');
-  var durasi=it.tipe==='tuweb'?Store.CONFIG.DURASI_TUWEB_MENIT:Store.CONFIG.DURASI_UAS_MENIT;
-  // Hitung jam dinding Jakarta lewat UTC supaya aman dari DST perangkat.
-  var mulai=new Date(Date.UTC(+t[0],+t[1]-1,+t[2],+jam[0]||0,+jam[1]||0));
-  var selesai=new Date(mulai.getTime()+durasi*60000);
-  return {mulai:mulai,selesai:selesai};
-}
-function fmtLokal(dt){
-  return dt.getUTCFullYear()+pad2(dt.getUTCMonth()+1)+pad2(dt.getUTCDate())+'T'+pad2(dt.getUTCHours())+pad2(dt.getUTCMinutes())+'00';
-}
-function tglBesok(s){var x=d(s);x.setDate(x.getDate()+1);return x.getFullYear()+pad2(x.getMonth()+1)+pad2(x.getDate())}
-
-function judulAcara(it){var mk=mkById(it.matkul_id);return namaItem(it)+' · '+(mk?mk.nama:'')}
-function deskripsiAcara(it){
-  var mk=mkById(it.matkul_id)||{}, b=[];
-  b.push((mk.kode?mk.kode+' · ':'')+(it.tipe==='uas'?'Ujian Akhir Semester':'Sesi '+it.sesi));
-  if(it.tipe==='tuweb' && it.link) b.push('Ruang Tuweb: '+it.link);
-  if(it.tipe!=='tuweb' && mk.link_tuton) b.push('Ruang Tuton: '+mk.link_tuton);
-  if(it.catatan) b.push('',it.catatan);
-  b.push('','Dari Tuton Tracker');
-  return b.join('\n');
-}
-
-function urlGcal(it){
-  var p=new URLSearchParams();
-  p.set('action','TEMPLATE');
-  p.set('text',judulAcara(it));
-  var w=waktuAcara(it);
-  if(w){ p.set('dates',fmtLokal(w.mulai)+'/'+fmtLokal(w.selesai)); p.set('ctz','Asia/Jakarta'); }
-  else p.set('dates',it.deadline.replace(/-/g,'')+'/'+tglBesok(it.deadline));
-  p.set('details',deskripsiAcara(it));
-  if(it.tipe==='tuweb' && it.link) p.set('location',it.link);
-  return 'https://calendar.google.com/calendar/render?'+p.toString();
-}
-function urlHariGcal(tgl){var t=tgl.split('-');return 'https://calendar.google.com/calendar/r/day/'+t[0]+'/'+(+t[1])+'/'+(+t[2])}
-function jejakKal(it){return it.deadline+'|'+(it.tipe==='tuweb'?(it.jam||Store.CONFIG.JAM_TUWEB_DEFAULT):(it.jam||''))}
-
+/* ---------- kontrol Google Calendar per item ---------- */
 function kontrolKalender(it,inline){
   var wrap=el('span','tw-sync'+(inline?' kal-inline':''));
+  var sibuk=false;
+
+  function pesanGagal(e){
+    var t=String(e && (e.message||e));
+    if(/authoriz|permission|izin|scope/i.test(t))
+      toast('Calendar belum diizinkan. Jalankan cekKalender() di editor.');
+    else toast('Gagal menghubungi Calendar');
+  }
+
   function gambar(){
+    wrap.className='tw-sync'+(inline?' kal-inline':'')+(it.kal_id?' on':'');
     wrap.innerHTML='';
-    wrap.className='tw-sync'+(inline?' kal-inline':'');
-    if(!it.deadline){ wrap.appendChild(el('span',null,'Isi tanggal dulu untuk menambahkan ke Google Calendar')); return }
-    if(it.kal_jejak){
-      var berubah=it.kal_jejak!==jejakKal(it);
-      wrap.classList.add(berubah?'beda':'on');
+    if(sibuk){ wrap.appendChild(el('span',null,'Memproses…')); return }
+
+    if(it.kal_id){
       wrap.appendChild(el('i'));
-      wrap.appendChild(el('span',null,berubah?'Jadwal berubah sejak ditambahkan — hapus event lama di kalender':'Sudah ditambahkan ke Google Calendar'));
-      var buka=el('a','lepas','buka kalender'); buka.href=urlHariGcal((berubah?it.kal_jejak:it.deadline).split('|')[0]); buka.target='_blank'; buka.rel='noopener';
-      wrap.appendChild(buka);
-      var lagi=el('button','lepas',berubah?'tambah versi baru':'tambah lagi'); lagi.onclick=tambah;
-      wrap.appendChild(lagi);
+      wrap.appendChild(el('span',null,'Di Google Calendar'));
+      var hapus=el('button','lepas','hapus dari kalender');
+      hapus.onclick=function(){
+        if(!confirm('Hapus event "'+namaItem(it)+'" dari Google Calendar?\n\nData di dashboard tetap aman, cuma event kalendernya yang dihapus.')) return;
+        sibuk=true; gambar();
+        call('lepasKalender',it.id).then(function(){
+          setLokal(it.id,{kal_id:''}); sibuk=false; gambar(); toast('Event dihapus dari Calendar');
+        }).catch(function(e){ sibuk=false; gambar(); pesanGagal(e) });
+      };
+      wrap.appendChild(hapus);
     } else {
-      var b=el('button','btn ghost small','Tambah ke Google Calendar'); b.onclick=tambah;
-      wrap.appendChild(b);
+      var tambah=el('button','btn ghost small','Tambah ke Google Calendar');
+      tambah.onclick=function(){
+        sibuk=true; gambar();
+        call('sinkronItemTunggal',it.id).then(function(json){
+          var h=JSON.parse(json);
+          setLokal(it.id,{kal_id:h.kal_id});
+          sibuk=false; gambar();
+          toast(h.aksi==='buat' ? 'Masuk ke kalender "'+h.kalender+'"' : 'Event diperbarui');
+        }).catch(function(e){ sibuk=false; gambar(); pesanGagal(e) });
+      };
+      wrap.appendChild(tambah);
     }
   }
-  function tambah(){
-    window.open(urlGcal(it),'_blank','noopener');
-    var p={kal_jejak:jejakKal(it)};
-    it.kal_jejak=p.kal_jejak;
-    call('ubahItem',it.id,p);
-    gambar();
+
+  function setLokal(id,patch){
+    for(var i=0;i<DB.item.length;i++) if(DB.item[i].id===id){
+      for(var k in patch){ DB.item[i][k]=patch[k]; it[k]=patch[k]; }
+      break;
+    }
   }
+
   gambar();
   return wrap;
-}
-
-/* File .ics untuk menambahkan banyak acara sekaligus */
-function escIcs(t){return String(t||'').replace(/\\/g,'\\\\').replace(/;/g,'\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n')}
-function lipatIcs(baris){
-  var out=[],sisa=baris;
-  while(sisa.length>73){out.push(sisa.slice(0,73));sisa=' '+sisa.slice(73)}
-  out.push(sisa); return out.join('\r\n');
-}
-function unduhIcs(tipeList,namaFile){
-  var items=itemSem().filter(function(i){return tipeList.indexOf(i.tipe)>=0 && aktif(i) && i.deadline && i.status!=='submitted'});
-  if(!items.length){ toast('Nggak ada jadwal yang bisa diunduh'); return 0 }
-  var now=new Date(), stamp=now.getUTCFullYear()+pad2(now.getUTCMonth()+1)+pad2(now.getUTCDate())+'T'+pad2(now.getUTCHours())+pad2(now.getUTCMinutes())+'00Z';
-  var L=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Tuton Tracker//ID','CALSCALE:GREGORIAN','METHOD:PUBLISH','X-WR-TIMEZONE:Asia/Jakarta'];
-  items.forEach(function(it){
-    L.push('BEGIN:VEVENT','UID:'+it.id+'@tuton-tracker','DTSTAMP:'+stamp);
-    var w=waktuAcara(it);
-    if(w){
-      // Jam dinding Jakarta (UTC+7) diubah ke UTC.
-      var m=new Date(w.mulai.getTime()-7*3600000), e=new Date(w.selesai.getTime()-7*3600000);
-      L.push('DTSTART:'+fmtLokal(m)+'Z','DTEND:'+fmtLokal(e)+'Z');
-      L.push('BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:'+escIcs(judulAcara(it)),'TRIGGER:-P1D','END:VALARM');
-      L.push('BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:'+escIcs(judulAcara(it)),'TRIGGER:-PT1H','END:VALARM');
-    } else {
-      L.push('DTSTART;VALUE=DATE:'+it.deadline.replace(/-/g,''),'DTEND;VALUE=DATE:'+tglBesok(it.deadline));
-    }
-    L.push('SUMMARY:'+escIcs(judulAcara(it)),'DESCRIPTION:'+escIcs(deskripsiAcara(it)));
-    if(it.tipe==='tuweb' && it.link) L.push('LOCATION:'+escIcs(it.link));
-    L.push('END:VEVENT');
-  });
-  L.push('END:VCALENDAR');
-  unduhTeks(L.map(lipatIcs).join('\r\n')+'\r\n', namaFile, 'text/calendar');
-  return items.length;
-}
-
-function unduhTeks(teks,nama,tipe){
-  var blob=new Blob([teks],{type:(tipe||'text/plain')+';charset=utf-8'});
-  var a=document.createElement('a');
-  a.href=URL.createObjectURL(blob); a.download=nama;
-  document.body.appendChild(a); a.click();
-  setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1000);
 }
 
 function renderJadwal(){renderKalender();renderTuwebList();renderUasList();renderSlotMingguan()}
@@ -650,7 +638,7 @@ function renderUasList(){
   });
 }
 
-
+function pad2(n){return (n<10?'0':'')+n}
 function kunciTgl(y,m,hari){return y+'-'+pad2(m+1)+'-'+pad2(hari)}
 
 /** Bulan awal: bulan Tuweb terdekat yang belum lewat, kalau tidak ada pakai bulan ini. */
@@ -960,18 +948,33 @@ function pindahView(v){
 }
 document.querySelectorAll('#nav button').forEach(function(b){b.onclick=function(){pindahView(b.dataset.v)}});
 
-$('#icsTuweb').onclick=function(){
-  var n=unduhIcs(['tuweb'],'tuweb-'+SEM.label+'.ics');
-  if(n) toast(n+' Tuweb diunduh. Impor di Google Calendar.');
-};
-$('#icsTugas').onclick=function(){
-  var n=unduhIcs(['tugas'],'tugas-'+SEM.label+'.ics');
-  if(n) toast(n+' deadline tugas diunduh. Impor di Google Calendar.');
-};
-$('#icsUas').onclick=function(){
-  var n=unduhIcs(['uas'],'uas-'+SEM.label+'.ics');
-  if(n) toast(n+' jadwal UAS diunduh. Impor di Google Calendar.');
-};
+function jalankanSync(btn, tipeList, labelSukses){
+  var teksAsli=btn.textContent;
+  btn.disabled=true; btn.textContent='Menyinkronkan…';
+  $('#syncInfo').textContent='Sedang menghubungi Google Calendar…';
+  call('sinkronSemester',SEM.id,tipeList).then(function(json){
+    var h=JSON.parse(json);
+    btn.disabled=false; btn.textContent=teksAsli;
+    if(h.kosong){
+      $('#syncInfo').textContent='Nggak ada yang bisa disinkronkan di semester ini.';
+      return;
+    }
+    var b=[];
+    if(h.buat) b.push(h.buat+' event dibuat');
+    if(h.perbarui) b.push(h.perbarui+' diperbarui');
+    if(h.lewat) b.push(h.lewat+' dilewati');
+    $('#syncInfo').textContent=labelSukses+' di kalender "'+h.kalender+'" · '+(b.join(', ')||'tidak ada perubahan')+'.';
+    toast('Tersinkron ke Calendar');
+    muat();
+  }).catch(function(e){
+    btn.disabled=false; btn.textContent=teksAsli;
+    $('#syncInfo').innerHTML='Gagal mengakses Calendar. Jalankan fungsi <b>cekKalender()</b> sekali di editor Apps Script untuk memberi izin, lalu deploy ulang.<br><span style="color:var(--ink3)">'+esc(e.message||e)+'</span>';
+  });
+}
+
+$('#syncTuweb').onclick=function(){jalankanSync(this,['tuweb'],'Tuweb tersinkron')};
+$('#syncTugas').onclick=function(){jalankanSync(this,['tugas'],'Deadline tugas tersinkron')};
+$('#syncUas').onclick=function(){jalankanSync(this,['uas'],'Jadwal UAS tersinkron')};
 
 $('#kalPrev').onclick=function(){geserBulan(-1)};
 $('#kalNext').onclick=function(){geserBulan(1)};
@@ -985,22 +988,21 @@ $('#semPick').onchange=function(){SEM=DB.semester.filter(function(s){return s.id
 $('#sSimpan').onclick=function(){
   var b=$('#sSimpan'); b.disabled=true; b.textContent='Menyimpan…';
   call('ubahSemester',SEM.id,{label:$('#sLabel').value.trim(),mulai_tuton:$('#sMulai').value,tgl_uas:$('#sUas').value})
-    .then(muat).then(function(){b.disabled=false;b.textContent='Simpan perubahan';toast('Semester diperbarui')})
-    .catch(function(e){b.disabled=false;b.textContent='Simpan perubahan';toast(e.message)});
+    .then(muat).then(function(){b.disabled=false;b.textContent='Simpan perubahan';toast('Semester diperbarui')});
 };
 
 $('#sBaru').onclick=function(){
   var label=prompt('Nama semester baru:',''); if(!label) return;
   var mulai=prompt('Tanggal Tuton mulai (YYYY-MM-DD):',''); if(!mulai) return;
-  call('tambahSemester',{label:label,mulai_tuton:mulai.trim(),tgl_uas:''}).then(function(id){SEM={id:id};return muat()})
-    .then(function(){toast('Semester '+label+' dibuat')}).catch(function(e){toast(e.message)});
+  call('tambahSemester',{label:label,mulai_tuton:mulai,tgl_uas:''}).then(function(id){SEM={id:id};return muat()})
+    .then(function(){toast('Semester '+label+' dibuat')});
 };
 
 $('#sDuplikat').onclick=function(){
   var label=prompt('Nama semester baru:',''); if(!label) return;
   var mulai=prompt('Tanggal Tuton mulai (YYYY-MM-DD):',''); if(!mulai) return;
-  call('duplikatSemester',SEM.id,label,mulai.trim(),'').then(function(id){SEM={id:id};return muat()})
-    .then(function(){toast('Matkul disalin ke '+label)}).catch(function(e){toast(e.message)});
+  call('duplikatSemester',SEM.id,label,mulai,'').then(function(id){SEM={id:id};return muat()})
+    .then(function(){toast('Matkul disalin ke '+label)});
 };
 
 (function(){
@@ -1013,8 +1015,10 @@ function tandaiSesiMassal(status,teks){
   var kena=itemSem().filter(function(i){return Number(i.sesi)===sesi && i.tipe!=='uas' && aktif(i) && i.status!==status});
   if(!kena.length){ toast('Sesi '+sesi+' sudah '+teks); return }
   if(!confirm('Tandai '+kena.length+' item di sesi '+sesi+' sebagai "'+teks+'" untuk semua mata kuliah?')) return;
-  call('tandaiSesi',SEM.id,sesi,status).then(function(n){ render(); toast(n+' item di sesi '+sesi+' ditandai '+teks) })
-    .catch(function(e){ toast(e.message) });
+  kena.forEach(function(i){ i.status=status });
+  render();
+  call('tandaiSesi',SEM.id,sesi,status).then(function(n){ toast(n+' item di sesi '+sesi+' ditandai '+teks) })
+    .catch(function(){ toast('Gagal menyimpan, muat ulang halaman'); muat() });
 }
 
 $('#bulkSelesai').onclick=function(){tandaiSesiMassal('submitted','selesai')};
@@ -1055,9 +1059,9 @@ $('#jdSimpan').onclick=function(){
 };
 
 /* ==================================================================
- *  Setup, status simpan, dan pengaturan penyimpanan
+ *  Sambungan ke Apps Script: layar setup dan panel koneksi
  * ================================================================== */
-var DALAM_SETUP=false, ADA_PENGINGAT=null;
+var URL_CODE_GS='https://github.com/my-razara/dashboard-kuliah/blob/main/apps-script/Code.gs';
 
 function tampilkan(mode,pesan){
   $('#boot').style.display = mode==='boot' ? 'block' : 'none';
@@ -1066,279 +1070,91 @@ function tampilkan(mode,pesan){
   if(mode==='boot' && pesan!==undefined) $('#boot').innerHTML=pesan;
 }
 
-function repoBawaan(){
-  var h=location.hostname;
-  var owner=/\.github\.io$/i.test(h) ? h.split('.')[0] : 'my-razara';
-  return owner+'/dashboard-kuliah-data';
+function cekUrl(u){
+  u=String(u||'').trim();
+  if(/\/dev(\?|$)/.test(u)) throw galat('Itu URL uji (/dev). Pakai Web app URL yang berakhiran /exec.');
+  if(!/^https:\/\/script\.google\.com\/(a\/macros\/[^/]+|macros)\/s\/[\w-]+\/exec$/.test(u.replace(/\?.*$/,''))){
+    throw galat('URL harus berupa Web app URL Apps Script, contohnya https://script.google.com/macros/s/…/exec');
+  }
+  return u.replace(/\?.*$/,'');
 }
 
-function kepalaSetup(judul,teks){
-  return '<div class="setup-head"><span class="setup-mark">Tuton Tracker</span><h2>'+judul+'</h2>'+(teks?'<p>'+teks+'</p>':'')+'</div>';
+function ringkasUrl(u){
+  var m=String(u||'').match(/\/s\/([\w-]+)\/exec/);
+  return m ? '…/s/'+m[1].slice(0,6)+'…'+m[1].slice(-4)+'/exec' : u;
 }
 
-/* ---------- langkah 1: sambungkan repo ---------- */
-function renderSetupKoneksi(galat){
-  DALAM_SETUP=true;
-  var repo=repoBawaan(), namaRepo=repo.split('/')[1];
+function renderSetup(galatAwal){
   $('#setupCard').innerHTML=
-    kepalaSetup('Sambungkan penyimpanan','Halaman ini cuma tampilan. Data kuliah lu disimpan di repo GitHub <b>private</b> milik lu sendiri, jadi nggak bisa dibaca orang lain walaupun halaman ini publik.')+
+    '<div class="setup-head"><span class="setup-mark">Tuton Tracker</span><h2>Sambungkan ke Apps Script</h2>'+
+    '<p>Datanya tetap di Google Sheets lu. Halaman ini cuma tampilan, jadi butuh alamat dan kunci dari Apps Script supaya bisa membaca dan menyimpan data.</p></div>'+
     '<ol class="setup-steps">'+
-      '<li><b>Bikin repo private kosong.</b> <a target="_blank" rel="noopener" href="https://github.com/new?name='+encodeURIComponent(namaRepo)+'&visibility=private&description='+encodeURIComponent('Data Tuton Tracker')+'">Buka formulir repo baru</a>. Namanya sudah terisi, pastikan yang dipilih <b>Private</b>.</li>'+
-      '<li><b>Bikin token akses.</b> <a target="_blank" rel="noopener" href="https://github.com/settings/personal-access-tokens/new">Buka halaman token</a>, lalu atur:'+
-        '<ul>'+
-          '<li>Repository access: <b>Only select repositories</b>, pilih repo tadi</li>'+
-          '<li>Permissions → <b>Contents</b>: Read and write</li>'+
-          '<li>Permissions → <b>Workflows</b>: Read and write <span class="muted">(buat pasang pengingat email)</span></li>'+
-          '<li>Expiration: pilih yang paling lama, dan catat tanggalnya</li>'+
-        '</ul></li>'+
+      '<li><b>Perbarui Code.gs.</b> Salin isi <a target="_blank" rel="noopener" href="'+URL_CODE_GS+'">Code.gs terbaru</a> dan tempel menimpa Code.gs di editor Apps Script, lalu simpan.</li>'+
+      '<li><b>Buat kunci.</b> Pilih fungsi <code>buatKunciApi</code>, klik Run, lalu salin kunci yang muncul di log.</li>'+
+      '<li><b>Deploy.</b> Deploy → New deployment → Web app, isi:'+
+        '<ul><li>Execute as: <b>Me</b></li><li>Who has access: <b>Anyone</b></li></ul>'+
+        'Salin <b>Web app URL</b>-nya.</li>'+
       '<li><b>Tempel di bawah.</b></li>'+
     '</ol>'+
-    '<div class="field"><label for="suRepo">Repo data</label><input id="suRepo" value="'+esc(repo)+'" autocapitalize="off" spellcheck="false"></div>'+
-    '<div class="field"><label for="suToken">Token</label><input id="suToken" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></div>'+
-    '<div class="setup-err" id="suErr">'+(galat?esc(galat):'')+'</div>'+
-    '<div class="btn-row"><button class="btn" id="suGo">Sambungkan</button></div>'+
-    '<p class="hint" style="margin-top:14px">Token disimpan di browser perangkat ini saja dan cuma bisa menyentuh repo yang lu pilih. HP dan laptop masing-masing perlu memasukkannya sekali.</p>';
+    '<div class="field"><label for="suUrl">Web app URL</label><input id="suUrl" type="url" autocapitalize="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec" value="'+esc(API?API.url:'')+'"></div>'+
+    '<div class="field"><label for="suKunci">Kunci API</label><input id="suKunci" type="password" autocomplete="off" spellcheck="false" placeholder="hasil buatKunciApi()"></div>'+
+    '<div class="setup-err" id="suErr">'+(galatAwal?esc(galatAwal):'')+'</div>'+
+    '<div class="btn-row"><button class="btn" id="suGo">Sambungkan</button>'+(DB?'<button class="btn ghost" id="suBatal">Batal</button>':'')+'</div>'+
+    '<p class="hint" style="margin-top:14px">"Anyone" berarti URL itu bisa dipanggil tanpa login Google, tapi setiap permintaan ditolak kalau tidak membawa kunci yang benar. Alamat dan kunci disimpan di browser perangkat ini saja; HP dan laptop masing-masing perlu memasukkannya sekali.</p>';
   tampilkan('setup');
+  if($('#suBatal')) $('#suBatal').onclick=function(){ tampilkan('app') };
   $('#suGo').onclick=function(){
-    var b=this; b.disabled=true; b.textContent='Menyambungkan…'; $('#suErr').textContent='';
-    Store.sambungkan($('#suRepo').value,$('#suToken').value).then(function(){
-      return Store.tarik();
-    }).then(function(hasil){
-      if(hasil==='kosong') renderSetupData();
-      else { DALAM_SETUP=false; cekStatusPengingat(); muat(); toast('Tersambung ke '+Store.repo()); }
-    }).catch(function(e){
+    var b=this, k;
+    $('#suErr').textContent='';
+    try{ k={url:cekUrl($('#suUrl').value), kunci:$('#suKunci').value.trim()}; }
+    catch(e){ $('#suErr').textContent=e.message; return }
+    if(!k.kunci){ $('#suErr').textContent='Kunci API belum diisi.'; return }
+    b.disabled=true; b.textContent='Menyambungkan…';
+    panggilApi(k,'ping',[]).then(function(){
+      API=k;
+      try{ localStorage.setItem(KUNCI_KONEKSI,JSON.stringify(k)) }catch(e){}
+      tampilkan('boot','Memuat data dari Google Sheets…');
+      return muat();
+    }).then(function(){ if(DB) toast('Tersambung') }).catch(function(e){
       b.disabled=false; b.textContent='Sambungkan';
       $('#suErr').textContent=e.message;
     });
   };
 }
 
-/* ---------- langkah 2: isi data awal ---------- */
-function sesiLewatSeed(){
-  var hari=Math.floor((d(Store.hariIni())-d('2026-09-14'))/86400000);
-  return Math.max(0,Math.min(8,Math.floor(hari/7)));
-}
-
-function renderSetupData(){
-  DALAM_SETUP=true;
-  var lewat=sesiLewatSeed(), opsiSesi='';
-  for(var i=0;i<=8;i++) opsiSesi+='<option value="'+i+'"'+(i===lewat?' selected':'')+'>'+(i===0?'Belum ada':'Sesi '+i)+'</option>';
-  $('#setupCard').innerHTML=
-    kepalaSetup('Isi data awal','Repo <b>'+esc(Store.repo())+'</b> tersambung dan masih kosong. Pilih dari mana datanya.')+
-    '<div class="opsi">'+
-      '<div class="opsi-item utama">'+
-        '<h3>Pindahkan dari Google Sheets lama</h3>'+
-        '<p>Buka spreadsheet Tuton Tracker lama → <b>File → Download → Microsoft Excel (.xlsx)</b>, lalu pilih file itu di sini. Status, nilai, catatan, tanggal Tuweb, dan slot jadwal ikut pindah.</p>'+
-        '<label class="btn file-btn">Pilih file .xlsx<input type="file" accept=".xlsx" id="suXlsx" hidden></label>'+
-      '</div>'+
-      '<div class="opsi-item">'+
-        '<h3>Pulihkan dari cadangan</h3>'+
-        '<p>File .json dari tombol Unduh cadangan.</p>'+
-        '<label class="btn ghost file-btn">Pilih file .json<input type="file" accept=".json,application/json" id="suJson" hidden></label>'+
-      '</div>'+
-      '<div class="opsi-item">'+
-        '<h3>Mulai dengan 7 mata kuliah semester ini</h3>'+
-        '<p>Semester 2026.1, Tuton mulai 14 September, UAS 23 November. Kode matkul dikosongkan, isi sendiri nanti.</p>'+
-        '<div class="row-inline"><label for="suSesi">Tandai selesai sampai</label><select id="suSesi">'+opsiSesi+'</select></div>'+
-        '<button class="btn ghost" id="suSeed">Buat data</button>'+
-      '</div>'+
-    '</div>'+
-    '<div id="suPratinjau"></div>'+
-    '<div class="setup-err" id="suErr"></div>'+
-    '<p class="hint" style="margin-top:14px"><button class="lepas" id="suGanti">Pakai repo atau token lain</button></p>';
-  tampilkan('setup');
-
-  function pilihFile(input){
-    var f=input.files[0]; if(!f) return;
-    $('#suErr').textContent=''; $('#suPratinjau').innerHTML='<p class="hint">Membaca '+esc(f.name)+'…</p>';
-    Store.bacaFileImpor(f).then(function(mentah){
-      var h=Store.rapikanImpor(mentah);
-      pratinjau(h, /\.json$/i.test(f.name)?'Pulihkan dari cadangan':'Impor dari Google Sheets');
-    }).catch(function(e){ $('#suPratinjau').innerHTML=''; $('#suErr').textContent=e.message; })
-      .then(function(){ input.value=''; });
-  }
-  $('#suXlsx').onchange=function(){pilihFile(this)};
-  $('#suJson').onchange=function(){pilihFile(this)};
-  $('#suSeed').onclick=function(){
-    var n=Number($('#suSesi').value);
-    simpanAwal(Store.dataAwal(n),'Buat data awal 7 mata kuliah',this);
-  };
-  $('#suGanti').onclick=function(){ Store.putuskan(); renderSetupKoneksi(); };
-}
-
-function ringkasData(db){
-  var aktifSem=db.semester.filter(function(s){return s.status==='aktif'})[0];
-  return db.semester.length+' semester'+(aktifSem?' (aktif: '+esc(aktifSem.label)+')':'')+', '+
-    db.matkul.length+' mata kuliah, '+db.item.length+' item, '+db.jadwal.length+' slot jadwal';
-}
-
-function pratinjau(h,pesan){
-  var w=$('#suPratinjau');
-  w.innerHTML='<div class="pratinjau"><b>Siap disimpan.</b> '+ringkasData(h.db)+'.'+
-    (h.tambahan?' <span class="muted">'+h.tambahan+' item ditambahkan karena belum ada di versi lama (misalnya daftar hadir dan UAS).</span>':'')+
-    '<div class="btn-row" style="margin-top:10px"><button class="btn" id="suSimpan">Simpan ke GitHub</button></div></div>';
-  $('#suSimpan').onclick=function(){ simpanAwal(h.db,pesan,this); };
-  w.scrollIntoView({block:'nearest'});
-}
-
-function simpanAwal(db,pesan,tombol){
-  if(tombol){ tombol.disabled=true; tombol.textContent='Menyimpan…'; }
-  $('#suErr').textContent='';
-  var hasilPengingat=null;
-  Store.buatData(db,pesan).then(function(){
-    return Store.pasangPengingat().then(function(h){hasilPengingat=h});
-  }).then(function(){
-    renderSetupSelesai(hasilPengingat);
-  }).catch(function(e){
-    if(tombol){ tombol.disabled=false; tombol.textContent='Coba lagi'; }
-    $('#suErr').textContent=e.message;
-  });
-}
-
-/* ---------- langkah 3: selesai ---------- */
-function renderSetupSelesai(hasil){
-  var wf=(hasil||[]).filter(function(h){return /workflows/.test(h.file)})[0];
-  ADA_PENGINGAT = wf ? wf.ok : null;
-  var baris='<li class="ok">Data tersimpan di <a target="_blank" rel="noopener" href="https://github.com/'+esc(Store.repo())+'">'+esc(Store.repo())+'</a></li>';
-  baris+= wf && wf.ok
-    ? '<li class="ok">File pengingat email terpasang</li>'
-    : '<li class="gagal">File pengingat email belum terpasang'+(wf?': '+esc(wf.ket):'')+'</li>';
-  $('#setupCard').innerHTML=
-    kepalaSetup('Siap dipakai','')+
-    '<ul class="cek">'+baris+'</ul>'+
-    '<p>Satu langkah lagi supaya email pengingat benar-benar terkirim: isi dua secret Gmail di repo data. Panduannya ada di <b>Atur → Penyimpanan &amp; pengingat</b>. Bisa dikerjakan nanti.</p>'+
-    '<div class="btn-row"><button class="btn" id="suMasuk">Buka dashboard</button></div>';
-  tampilkan('setup');
-  $('#suMasuk').onclick=function(){ DALAM_SETUP=false; SEM=null; muat(); };
-}
-
-/* ---------- status simpan ---------- */
-var STATUS_TEKS={
-  tersimpan:['Tersimpan','ok'], menunggu:['Menyimpan…','sibuk'], menyimpan:['Menyimpan…','sibuk'],
-  offline:['Offline','warn'], akses:['Token bermasalah','err'], galat:['Gagal menyimpan','err'],
-  diam:['Memuat…','sibuk'], kosong:['Data kosong','warn']
-};
-var statusSebelum='';
-function renderStatus(){
-  var st=Store.status(), t=STATUS_TEKS[st.status]||['',''];
-  var teks=t[0]+(st.pending && (st.status==='offline'||st.status==='galat'||st.status==='akses')?' · '+st.pending+' menunggu':'');
-  var pill=$('#syncPill');
-  if(pill){
-    pill.className='sync-pill '+t[1];
-    pill.querySelector('span').textContent=teks;
-    pill.title=st.pesan||teks;
-  }
-  if(st.status!==statusSebelum && (st.status==='akses'||st.status==='galat') && !DALAM_SETUP) toast(st.pesan||teks);
-  statusSebelum=st.status;
-  var cs=$('#cfgStatus'); if(cs) cs.textContent=keteranganStatus(st);
-}
-function keteranganStatus(st){
-  var t=(STATUS_TEKS[st.status]||[''])[0];
-  var kapan=st.terakhir ? ' · terakhir sinkron '+new Date(st.terakhir).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}) : '';
-  var tunggu=st.pending ? ' · '+st.pending+' perubahan belum terkirim' : '';
-  return t+kapan+tunggu+(st.pesan && st.status!=='tersimpan' ? '. '+st.pesan : '');
-}
-
-function cekStatusPengingat(){
-  Store.cekPengingat().then(function(ada){ ADA_PENGINGAT=ada; var r=$('#cfgRem'); if(r) r.innerHTML=labelPengingat(); });
-}
-function labelPengingat(){
-  if(ADA_PENGINGAT===true) return '<span class="tag ok">terpasang</span>';
-  if(ADA_PENGINGAT===false) return '<span class="tag warn">belum terpasang</span>';
-  return '<span class="tag">belum dicek</span>';
-}
-
-/* ---------- panel pengaturan ---------- */
 function renderPengaturan(){
-  var w=$('#cfgCard'); if(!w) return;
-  var repo=Store.repo(), gh='https://github.com/'+repo;
+  var w=$('#cfgCard'); if(!w||!API) return;
   w.innerHTML=
-    '<h3 class="sec-title">Penyimpanan &amp; pengingat</h3>'+
-    '<div class="cfg-row"><div><b>Repo data</b><span>'+esc(repo)+' · private</span></div>'+
-      '<a class="btn ghost small" target="_blank" rel="noopener" href="'+gh+'">Buka repo</a></div>'+
-    '<div class="cfg-row"><div><b>Status</b><span id="cfgStatus">'+esc(keteranganStatus(Store.status()))+'</span></div>'+
-      '<button class="btn ghost small" id="cfgSync">Sinkronkan sekarang</button></div>'+
-
-    '<h4 class="cfg-sub">Pengingat email</h4>'+
-    '<ol class="cfg-steps">'+
-      '<li>File pengingat di repo data: <span id="cfgRem">'+labelPengingat()+'</span> <button class="lepas" id="cfgPasang">pasang / perbarui</button></li>'+
-      '<li>Bikin App Password Gmail di <a target="_blank" rel="noopener" href="https://myaccount.google.com/apppasswords">myaccount.google.com/apppasswords</a>. Butuh verifikasi 2 langkah yang sudah aktif.</li>'+
-      '<li>Isi secret di <a target="_blank" rel="noopener" href="'+gh+'/settings/secrets/actions">Settings → Secrets and variables → Actions</a>: '+
-        '<code>GMAIL_USER</code> berisi alamat Gmail, <code>GMAIL_APP_PASSWORD</code> berisi 16 huruf tadi. Opsional <code>EMAIL_TO</code> kalau mau dikirim ke alamat lain.</li>'+
-      '<li>Uji di <a target="_blank" rel="noopener" href="'+gh+'/actions/workflows/reminder.yml">Actions → Pengingat Tuton</a> → <b>Run workflow</b> dengan mode <b>tes</b>.</li>'+
-    '</ol>'+
-    '<p class="hint">Jalan tiap pagi sekitar 06.40 WIB. Senin: rekap seminggu ke depan. Hari lain: cuma kalau ada Tuweb atau UAS besok atau hari ini, atau deadline yang jatuh hari itu.</p>'+
-
-    '<h4 class="cfg-sub">Cadangan</h4>'+
-    '<div class="btn-row">'+
-      '<button class="btn ghost small" id="cfgUnduh">Unduh cadangan (.json)</button>'+
-      '<label class="btn ghost small file-btn">Ganti semua data dari file…<input type="file" accept=".json,.xlsx" id="cfgImpor" hidden></label>'+
-    '</div>'+
-    '<p class="hint">Tiap perubahan juga tersimpan sebagai commit di repo data, jadi versi lama selalu bisa dilihat atau dipulihkan dari riwayatnya.</p>'+
-
+    '<h3 class="sec-title">Koneksi</h3>'+
+    '<div class="cfg-row"><div><b>Apps Script</b><span>'+esc(ringkasUrl(API.url))+'</span></div>'+
+      '<button class="btn ghost small" id="cfgMuat">Muat ulang data</button></div>'+
+    '<p class="hint">Data, Google Calendar, dan pengingat email semuanya tetap dijalankan Apps Script. Kalau Code.gs diubah, buat deployment versi baru di URL yang sama: Deploy → Manage deployments → edit → Version: New version.</p>'+
     '<h4 class="cfg-sub">Perangkat ini</h4>'+
-    '<button class="btn danger small" id="cfgPutus">Putuskan perangkat ini</button>'+
-    '<p class="hint">Menghapus token dari browser ini. Data di GitHub tidak tersentuh.</p>';
-
-  $('#cfgSync').onclick=function(){
+    '<div class="btn-row">'+
+      '<button class="btn ghost small" id="cfgGanti">Ganti URL atau kunci</button>'+
+      '<button class="btn danger small" id="cfgPutus">Putuskan perangkat ini</button>'+
+    '</div>'+
+    '<p class="hint">Kalau HP hilang, jalankan <code>buatKunciApi</code> lagi di editor. Kunci lama langsung tidak berlaku di semua perangkat, lalu masukkan kunci baru di perangkat yang masih lu pakai.</p>';
+  $('#cfgMuat').onclick=function(){
     var b=this; b.disabled=true;
-    Store.kirimSekarang().then(function(){return Store.tarik()}).then(function(r){
-      b.disabled=false; toast(r==='berubah'?'Data terbaru dimuat':'Sudah sinkron');
-    }).catch(function(e){ b.disabled=false; toast(e.message) });
+    muat().then(function(){ b.disabled=false; toast('Data terbaru dimuat') });
   };
-  $('#cfgPasang').onclick=function(){
-    var b=this; b.disabled=true; b.textContent='memasang…';
-    Store.pasangPengingat().then(function(hasil){
-      var gagal=hasil.filter(function(h){return !h.ok});
-      var wf=hasil.filter(function(h){return /workflows/.test(h.file)})[0];
-      ADA_PENGINGAT = wf ? wf.ok : ADA_PENGINGAT;
-      $('#cfgRem').innerHTML=labelPengingat();
-      b.disabled=false; b.textContent='pasang / perbarui';
-      toast(gagal.length ? gagal[0].ket : 'File pengingat sudah terbaru');
-    });
-  };
-  $('#cfgUnduh').onclick=function(){
-    unduhTeks(Store.eksporJson(),'tuton-tracker-'+Store.hariIni()+'.json','application/json');
-  };
-  $('#cfgImpor').onchange=function(){
-    var input=this, f=input.files[0]; if(!f) return;
-    Store.bacaFileImpor(f).then(function(mentah){
-      var h=Store.rapikanImpor(mentah);
-      if(!confirm('Ganti SELURUH data dengan isi file ini?\n\n'+ringkasData(h.db).replace(/<[^>]+>/g,'')+'.\n\nData sekarang tetap bisa dipulihkan dari riwayat commit di repo.')) return;
-      Store.gantiSemua(h.db); SEM=null; muat(); toast('Data diganti dari '+f.name);
-    }).catch(function(e){ toast(e.message) }).then(function(){ input.value=''; });
-  };
+  $('#cfgGanti').onclick=function(){ renderSetup() };
   $('#cfgPutus').onclick=function(){
-    var st=Store.status();
-    var pesan='Putuskan perangkat ini dari '+repo+'?'+(st.pending?'\n\nAda '+st.pending+' perubahan yang BELUM terkirim ke GitHub dan akan hilang.':'');
-    if(!confirm(pesan)) return;
-    Store.putuskan(); location.reload();
+    if(!confirm('Putuskan perangkat ini? Data di Google Sheets tidak tersentuh, cuma alamat dan kunci di browser ini yang dihapus.')) return;
+    try{ localStorage.removeItem(KUNCI_KONEKSI); localStorage.removeItem(KUNCI_CACHE) }catch(e){}
+    location.reload();
   };
 }
 
-/* ---------- mulai ---------- */
 function mulai(){
-  Store.init();
-  Store.on('data',function(){ if(!DALAM_SETUP) muat(); });
-  Store.on('status',renderStatus);
-  $('#syncPill').onclick=function(){ pindahView('atur'); var c=$('#cfgCard'); if(c) c.scrollIntoView({block:'start'}); };
-
-  if(!Store.tersambung()){ renderSetupKoneksi(); return; }
-  if(Store.view) muat(); else tampilkan('boot','Memuat data dari GitHub…');
-
-  Store.tarik().then(function(r){
-    if(r==='kosong'){ renderSetupData(); return; }
-    cekStatusPengingat();
-  }).catch(function(e){
-    if(Store.view) return;   // tetap pakai salinan di perangkat, status sudah ditandai
-    tampilkan('boot',
-      '<b style="display:block;color:var(--ink);font-size:16px;margin-bottom:6px">Gagal memuat data</b>'+esc(e.message)+
-      '<div class="btn-row" style="justify-content:center;margin-top:14px">'+
-        '<button class="btn" id="bootUlang">Coba lagi</button>'+
-        '<button class="btn ghost" id="bootGanti">Ganti repo atau token</button></div>');
-    $('#bootUlang').onclick=function(){ location.reload(); };
-    $('#bootGanti').onclick=function(){ Store.putuskan(); renderSetupKoneksi(); };
-  });
+  if(!API){ renderSetup(); return }
+  // Tampilkan salinan terakhir dulu supaya langsung kebuka, lalu ambil data terbaru.
+  var cache=null;
+  try{ cache=localStorage.getItem(KUNCI_CACHE) }catch(e){}
+  if(cache){ try{ terapkanData(cache) }catch(e){ cache=null } }
+  if(!cache) tampilkan('boot','Memuat data dari Google Sheets…');
+  muat();
 }
 
 mulai();

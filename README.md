@@ -6,49 +6,45 @@ Dashboard pelacak kuliah Universitas Terbuka: diskusi, latihan, tugas, daftar ha
 
 ## Cara kerjanya
 
-Repo ini publik dan cuma berisi tampilan. Data kuliah disimpan di repo **private** terpisah sebagai satu file `data.json`, dibaca dan ditulis langsung dari browser lewat GitHub API.
+Repo ini cuma berisi tampilan, di-host GitHub Pages. Datanya tetap di Google Sheets, dan Apps Script yang mengerjakan semua yang butuh akses Google:
 
 ```
-dashboard-kuliah (publik, GitHub Pages)      dashboard-kuliah-data (private)
-  index.html  ─────── token, GitHub API ──────▶  data.json
-  assets/                                         .github/workflows/reminder.yml
-  data-repo/  ── disalin saat setup ──────────▶   .github/scripts/reminder.py
+my-razara.github.io/dashboard-kuliah      Apps Script (Web App)         Google
+  index.html, assets/   ── fetch + kunci ──▶  doPost → fungsi Code.gs ──▶  Sheets
+                                                                         Calendar
+                                             trigger harian ───────────▶ Gmail
 ```
 
-- Perubahan disimpan otomatis, dikumpulkan jadi satu commit tiap jeda singkat. Riwayat lengkapnya ada di commit repo data.
-- HP dan laptop memakai data yang sama. Kalau keduanya mengubah data bersamaan, perubahan digabung, nggak saling menimpa.
-- Saat offline, perubahan disimpan di perangkat dan dikirim begitu online lagi.
-- Pengingat email dijalankan GitHub Actions di repo data tiap pagi sekitar 06.40 WIB.
-- Google Calendar: tombol per item membuka Google Calendar dengan acara yang sudah terisi, atau unduh file `.ics` untuk banyak sekaligus.
+- **Data** tetap di spreadsheet dan masih bisa diedit langsung dari Sheets.
+- **Google Calendar** sinkron dua arah: tambah, perbarui, dan hapus event langsung dari dashboard.
+- **Pengingat email** tetap dikirim trigger Apps Script.
+- **Kunci API** wajib di setiap permintaan. Web App di-deploy dengan akses "Anyone" supaya bisa dipanggil dari github.io, tapi tanpa kunci yang benar semua permintaan ditolak.
 
-## Setup pertama kali
+## Setup
 
-1. Bikin repo **private** kosong bernama `dashboard-kuliah-data`.
-2. Bikin [fine-grained token](https://github.com/settings/personal-access-tokens/new):
-   - Repository access: **Only select repositories** → `dashboard-kuliah-data`
-   - Permissions → **Contents**: Read and write
-   - Permissions → **Workflows**: Read and write
-3. Buka dashboard, tempel nama repo dan token.
-4. Pilih sumber data: impor `.xlsx` dari Google Sheets lama (**File → Download → Microsoft Excel**), pulihkan cadangan `.json`, atau mulai dengan 7 mata kuliah semester ini.
+Di editor Apps Script yang terikat ke spreadsheet:
 
-Token disimpan di browser perangkat itu saja. Tiap perangkat perlu memasukkannya sekali.
+1. Tempel isi [`apps-script/Code.gs`](apps-script/Code.gs) menimpa Code.gs lama, simpan.
+2. Jalankan `buatKunciApi`, salin kunci dari log.
+3. **Deploy → New deployment → Web app**
+   - Execute as: **Me**
+   - Who has access: **Anyone**
+4. Salin Web app URL (berakhiran `/exec`).
+5. Buka dashboard, tempel URL dan kunci.
 
-### Pengingat email
+Alamat dan kunci disimpan di browser perangkat itu saja. Tiap perangkat perlu memasukkannya sekali.
 
-Di repo data, **Settings → Secrets and variables → Actions**, isi:
+### Kalau Code.gs diubah
 
-| Secret | Isi |
-|---|---|
-| `GMAIL_USER` | Alamat Gmail pengirim |
-| `GMAIL_APP_PASSWORD` | App Password dari [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) (butuh verifikasi 2 langkah) |
-| `EMAIL_TO` | Opsional, alamat tujuan kalau beda |
+**Deploy → Manage deployments → ikon pensil → Version: New version → Deploy.** URL tetap sama, dashboard nggak perlu diatur ulang.
 
-Uji lewat **Actions → Pengingat Tuton → Run workflow**, mode `tes`.
+### Kalau HP hilang
 
-| Hari | Isi email |
-|---|---|
-| Senin | Rekap semua yang jatuh tempo 7 hari ke depan dan yang sudah lewat |
-| Hari lain | Hanya kalau ada Tuweb atau UAS besok/hari ini, atau diskusi, latihan, tugas yang jatuh tempo hari itu |
+Jalankan `buatKunciApi` lagi. Kunci lama langsung nggak berlaku di semua perangkat; masukkan kunci baru di perangkat yang masih dipakai. `lihatKunciApi` menampilkan kunci yang sedang berlaku.
+
+## Fungsi yang bisa dipanggil dashboard
+
+Hanya fungsi di daftar `API_DIIZINKAN` dalam Code.gs: baca data, ubah semester/matkul/item/jadwal, tandai sesi, lengkapi item, dan sinkron Calendar. Reset data, migrasi, pembuatan kunci, dan pemasangan trigger tetap hanya bisa dijalankan dari editor.
 
 ## Struktur file
 
@@ -56,18 +52,5 @@ Uji lewat **Actions → Pengingat Tuton → Run workflow**, mode `tes`.
 |---|---|
 | `index.html` | Kerangka halaman |
 | `assets/style.css` | Tampilan |
-| `assets/store.js` | Penyimpanan GitHub, antrean perubahan, pola mata kuliah, generator item, impor |
-| `assets/app.js` | Tampilan: matriks, jadwal, kalender, nilai, prompt asisten, setup |
-| `data-repo/` | Workflow dan skrip pengingat yang dipasang ke repo data |
-
-### Mengubah pola mata kuliah atau bobot nilai
-
-Di `assets/store.js`, bagian `POLA` dan `CONFIG`. Setelah mengubah `POLA`, jalankan **Atur → Lengkapi item sesuai pola** di dashboard untuk menambah item yang kurang tanpa menghapus apa pun.
-
-Kalau mengubah `data-repo/`, pasang ulang lewat **Atur → Penyimpanan & pengingat → pasang / perbarui**.
-
-## Keamanan
-
-- Token cuma bisa menyentuh repo yang dipilih saat membuatnya. Kalau HP hilang, cabut token di [pengaturan token GitHub](https://github.com/settings/personal-access-tokens).
-- Dashboard menolak tersambung ke repo yang masih publik.
-- Halaman ini tidak memuat skrip pihak ketiga selain font Google dan pembaca Excel (dari cdnjs, hanya saat impor).
+| `assets/app.js` | Semua logika tampilan + pemanggilan API |
+| `apps-script/Code.gs` | Backend, ditempel ke editor Apps Script |

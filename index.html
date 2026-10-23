@@ -35,7 +35,6 @@
       <button data-v="atur"><span class="dot"></span><span class="lbl-full">Atur semester</span><span class="lbl-short">Atur</span></button>
     </nav>
     <div class="rail-foot" id="semWrap">
-      <button class="sync-pill sibuk" id="syncPill" type="button"><i></i><span>Memuat…</span></button>
       <label for="semPick">Semester</label>
       <select id="semPick"></select>
     </div>
@@ -108,10 +107,10 @@
         <div id="twList"></div>
         <div class="sync-bar">
           <div class="btn-row" style="margin:0">
-            <button class="btn ghost" id="icsTuweb">Unduh semua Tuweb (.ics)</button>
-            <button class="btn ghost" id="icsTugas">Unduh deadline tugas (.ics)</button>
+            <button class="btn" id="syncTuweb">Sinkronkan Tuweb ke Google Calendar</button>
+            <button class="btn ghost" id="syncTugas">Tambahkan deadline tugas</button>
           </div>
-          <p class="hint" style="margin:10px 0 0">Tombol di tiap baris membuka Google Calendar dengan acara yang sudah terisi, tinggal Simpan. File .ics buat menambahkan banyak sekaligus lewat Google Calendar → Setelan → Impor. Mengimpor file yang sama dua kali bisa bikin acara dobel. Untuk menghapus acara, hapus langsung di Google Calendar.</p>
+          <p class="hint" id="syncInfo" style="margin:10px 0 0">Bisa juga ditambah satu per satu lewat tombol di tiap baris di atas. Setelah tersinkron, perubahan tanggal atau jam otomatis memperbarui event di Calendar.</p>
         </div>
       </div>
 
@@ -121,7 +120,7 @@
         <div id="uasList"></div>
         <div class="sync-bar">
           <div class="btn-row" style="margin:0">
-            <button class="btn ghost" id="icsUas">Unduh semua UAS (.ics)</button>
+            <button class="btn ghost" id="syncUas">Tambahkan semua UAS ke Google Calendar</button>
           </div>
         </div>
       </div>
@@ -216,7 +215,6 @@
 <aside class="drawer" id="drawer" aria-hidden="true"></aside>
 <div class="toast" id="toast"></div>
 
-<script src="assets/store.js"></script>
 <script src="assets/app.js"></script>
 </body>
 </html>

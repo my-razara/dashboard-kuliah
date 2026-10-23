@@ -399,38 +399,10 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;back
 .setup-steps ul{margin:6px 0 0 18px;color:var(--ink2);font-size:13.5px;display:flex;flex-direction:column;gap:3px}
 .setup-err{color:var(--alert);font-size:13.5px;min-height:1px;margin:2px 0 10px}
 .setup-err:empty{margin:0}
-.opsi{display:flex;flex-direction:column;gap:12px;margin-bottom:14px}
-.opsi-item{border:1px solid var(--rule);border-radius:var(--r);padding:15px 16px}
-.opsi-item.utama{border-color:var(--pen);background:#FAFBFE}
-.opsi-item h3{font-size:15.5px;margin-bottom:4px}
-.opsi-item p{font-size:13.5px;color:var(--ink2);margin-bottom:11px}
-.row-inline{display:flex;align-items:center;gap:9px;margin-bottom:11px;font-size:13.5px;color:var(--ink2);flex-wrap:wrap}
-.row-inline select{border:1px solid var(--rule);border-radius:7px;padding:6px 9px;background:var(--surface);font-size:14px}
-.file-btn{display:inline-flex;align-items:center;cursor:pointer}
-.pratinjau{border:1px solid var(--pen);background:var(--pen-soft);border-radius:var(--r);padding:13px 15px;font-size:14px;margin-bottom:12px}
-.cek{list-style:none;display:flex;flex-direction:column;gap:8px;margin-bottom:16px;font-size:14.5px}
-.cek li{padding-left:24px;position:relative}
-.cek li::before{position:absolute;left:0;top:0;font-weight:700}
-.cek li.ok::before{content:'✓';color:var(--pen)}
-.cek li.gagal::before{content:'!';color:var(--alert)}
 a.lepas,button.lepas{font-size:12.5px;color:var(--ink3);text-decoration:underline;padding:0;background:none;border:none;cursor:pointer}
 a.lepas:hover,button.lepas:hover{color:var(--pen)}
 
-/* status simpan */
-.sync-pill{display:flex;align-items:center;gap:7px;width:100%;margin-bottom:14px;padding:6px 9px;border-radius:8px;
-  background:rgba(255,255,255,.06);color:#B8C2D3;font-size:12.5px;text-align:left}
-.sync-pill:hover{background:rgba(255,255,255,.11)}
-.sync-pill i{width:7px;height:7px;border-radius:50%;flex:0 0 7px;background:#7E8AA0}
-.sync-pill.ok i{background:#6FD39B}
-.sync-pill.sibuk i{background:#8FB0FF;animation:denyut 1.1s ease-in-out infinite}
-.sync-pill.warn i{background:var(--mark)}
-.sync-pill.err{color:#FFC9C9}
-.sync-pill.err i{background:#FF7A7A}
-@keyframes denyut{50%{opacity:.35}}
 
-/* kontrol kalender */
-.tw-sync.beda{color:#9A6512}
-.tw-sync.beda i{background:var(--mark);opacity:1}
 .tw-sync{flex-wrap:wrap;white-space:normal;gap:6px 8px}
 
 /* pengaturan */
@@ -440,17 +412,11 @@ a.lepas:hover,button.lepas:hover{color:var(--pen)}
 .cfg-row span{font-size:13px;color:var(--ink2)}
 .cfg-sub{font-family:'Bricolage Grotesque',sans-serif;font-size:14.5px;margin:20px 0 9px}
 .cfg-steps{margin:0 0 10px 20px;display:flex;flex-direction:column;gap:8px;font-size:14px}
-.tag.ok{background:var(--pen-soft);color:var(--pen)}
-.tag.warn{background:var(--mark-soft);color:#8A5A12}
 
 @media (max-width:760px){
   .setup{padding:20px 12px 40px}
   .setup-card{padding:20px 16px}
   .setup-head h2{font-size:21px}
-  .topbar .sync-pill{width:auto;margin:0 8px 0 0;background:var(--surface);border:1px solid var(--rule);color:var(--ink2);padding:6px 9px}
-  .topbar .sync-pill span{display:none}
-  .topbar .sync-pill.err span,.topbar .sync-pill.warn span{display:inline}
-  .topbar .rail-foot{display:flex;align-items:center}
 }
 
 /* perbaikan kecil */
